@@ -1,7 +1,7 @@
 const Discord = require('discord.js');
 const Loki = require('lokijs');
 const bot = new Discord.Client({autoReconnect: true});
-const reactThreshold = 3;
+const reactThreshold = 1;
 // const timeTillLate = 86400; // One day
 const events = {
   MESSAGE_REACTION_ADD: 'messageReactionAdd',
@@ -67,7 +67,9 @@ bot.on('message', function (message) {
           });
           break;
         case 'help':
-          let msg = 'Here\'s what I know: *ahem*\n';
+          let msg = '';
+          msg += reactThreshold + ' 📸 react' + (reactThreshold === 1 ? '' : 's') + ' and I\'ll save the post. React with 👍 to show some love!\n';
+          msg += 'Here\'s what I know: *ahem*\n';
           msg += '**- posts** shows the top 3 posts of all time\n';
           msg += '**- me** shows your top 3 posts (of all time)\n';
           msg += '**- snaps** shows a leaderboard for most snapped users\n';
@@ -95,6 +97,11 @@ function sendEmbedList (results, channel, scrapChannel, count) {
   let result = results.shift();
   scrapChannel.fetchMessage(result.botMessageId).then(retrivedMsg => {
     channel.send(`#${count} - ${result.likes} like${result.likes === 1 ? '' : 's'}`, {embed: retrivedMsg.embeds[0]}).then(msg => {
+      sendEmbedList(results, channel, scrapChannel, count + 1);
+    });
+  }).catch(err => {
+    console.log(err);
+    channel.send(`#${count} - ${result.likes} like${result.likes === 1 ? '' : 's'} - <my snap deleted> 😭`).then(msg => {
       sendEmbedList(results, channel, scrapChannel, count + 1);
     });
   });
