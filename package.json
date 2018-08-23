@@ -1,0 +1,15 @@
+{
+  "name": "scrapbrooke",
+  "version": "0.1.0",
+  "description": "I take a picture of you taking a picture of me uwu",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "author": "Frano Stanisic",
+  "license": "MIT",
+  "dependencies": {
+    "discord.js": "^11.3.2",
+    "lokijs": "^1.5.5"
+  }
+}
