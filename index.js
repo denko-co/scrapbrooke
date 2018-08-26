@@ -94,7 +94,7 @@ bot.on('message', function (message) {
                   let mentionedUser = guild.member(mentionedUserId);
                   switch (state) {
                     case 'EXPORT':
-                      if (user) {
+                      if (mentionedUser) {
                         message.channel.send('Can\'t export multiple users at once!' +
                         ' I don\'t make the rules, I just think them up and write them down.');
                       } else {
@@ -145,7 +145,7 @@ bot.on('message', function (message) {
               let results = dataset.simplesort('quoteOn', true).data();
               // Now that we have the result set, build our response
               if (results.length === 0) {
-                message.channel.send('No results returned! Time to get snapping! 📸');
+                message.channel.send('No matching quotes found! Time to get snapping! 📸');
               } else {
                 message.channel.send('Exporting results! (this might take a while ...)').then(msg => {
                   createAndSendExport(results, scrapbookChannel, message.channel);
