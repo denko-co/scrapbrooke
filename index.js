@@ -278,15 +278,15 @@ bot.on('raw', async event => {
   bot.emit(events[event.t], reaction, user);
 });
 
-bot.on('messageReactionAdd', function (messageReaction) {
-  handleReaction(messageReaction);
+bot.on('messageReactionAdd', function (messageReaction, user) {
+  handleReaction(messageReaction, user);
 });
 
-bot.on('messageReactionRemove', function (messageReaction) {
-  handleReaction(messageReaction);
+bot.on('messageReactionRemove', function (messageReaction, user) {
+  handleReaction(messageReaction, user);
 });
 
-function handleReaction (messageReaction) {
+function handleReaction (messageReaction, user) {
   if (!['📸', '👍'].includes(messageReaction.emoji.name)) return;
   let guild = messageReaction.message.guild;
   if (!guild) return;
@@ -299,6 +299,8 @@ function handleReaction (messageReaction) {
     case '📸':
       messageInfo = db.getCollection('scraps').findOne({'originalMessageId': messageReaction.message.id});
       if (messageReaction.count >= reactThreshold && !messageInfo) {
+        let users = Array.from(messageReaction.users.keys());
+        if (users.length === 0) users = [user.id];
         // New snap taken, post it!
         let msg = createEmbed(messageReaction.message);
         // Need to insert before posting to stop duplicates due to weaving
@@ -308,7 +310,7 @@ function handleReaction (messageReaction) {
           authorId: messageReaction.message.author.id,
           channelId: messageReaction.message.channel.id,
           guildId: messageReaction.message.guild.id,
-          snappedBy: Array.from(messageReaction.users.keys()),
+          snappedBy: users,
           quoteOn: messageReaction.message.createdTimestamp,
           likes: 1
         });
