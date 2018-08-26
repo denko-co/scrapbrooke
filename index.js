@@ -1,7 +1,8 @@
 const Discord = require('discord.js');
 const Loki = require('lokijs');
 const bot = new Discord.Client({autoReconnect: true});
-const reactThreshold = 3;
+const reactThreshold = 1;
+const funPolice = true;
 // const timeTillLate = 86400; // One day
 const events = {
   MESSAGE_REACTION_ADD: 'messageReactionAdd',
@@ -35,7 +36,12 @@ bot.on('message', function (message) {
     if (command[0] !== bot.user.toString()) return;
     if (command[1]) {
       let scraps = db.getCollection('scraps');
-      switch (command[1]) {
+      let lCommand = command[1].toLowerCase();
+      if (['posts', 'snaps', 'likes', 'me'].includes(lCommand) && funPolice) {
+        message.channel.send(';~;');
+        return;
+      }
+      switch (lCommand) {
         case 'posts':
           let results = scraps.chain().simplesort('likes', true).limit(3).data();
           message.channel.send('Here are the top 3 most popular snaps of all time. *ahem*').then(msg => {
@@ -66,22 +72,164 @@ bot.on('message', function (message) {
             sendEmbedList(myresults, message.channel, scrapbookChannel, 1);
           });
           break;
+        case 'export':
+          // Let's go!
+          if (command[2]) {
+            // Check if user
+            let userId = getUserFromMention(command[2]);
+            let user = guild.member(getUserFromMention(userId));
+            if (user) {
+              // Ready to rock, try to parse...
+              let state = 'EXPORT';
+              let before = null;
+              let after = null;
+              let withUsers = [];
+              let withoutUsers = [];
+              for (let i = 3; i < command.length; i++) {
+                let com = command[i].toUpperCase();
+                if (['WITH', 'WITHOUT', 'BEFORE', 'AFTER'].includes(com)) {
+                  state = com;
+                } else {
+                  let mentionedUserId = getUserFromMention(command[i]);
+                  let mentionedUser = guild.member(mentionedUserId);
+                  switch (state) {
+                    case 'EXPORT':
+                      if (user) {
+                        message.channel.send('Can\'t export multiple users at once!' +
+                        ' I don\'t make the rules, I just think them up and write them down.');
+                      } else {
+                        message.channel.send('Sorry, if ' + command[i] + ' is a command I don\'t know it.' +
+                          ' Maybe you need some help? uwu');
+                      }
+                      return;
+                    case 'WITH':
+                    case 'WITHOUT':
+                      if (mentionedUser) {
+                        let arr = state === 'WITH' ? withUsers : withoutUsers;
+                        arr.push(mentionedUserId);
+                      } else {
+                        message.channel.send('Sorry, I don\'t know someone called ' + command[i] +
+                          '. Make sure you are using a proper user mention! Don\'t worry about pinging them, I\'m sure it\'ll be fine ;)');
+                        return;
+                      }
+                      break;
+                    case 'BEFORE':
+                    case 'AFTER':
+                      let date = state === 'BEFORE' ? before : after;
+                      if (date) {
+                        message.channel.send('You know that ' + state + ' only takes one param, right? >w<');
+                        return;
+                      } else {
+                        let dateToParse = Date.parse(command[i]);
+                        if (isNaN(dateToParse)) {
+                          message.channel.send('Sorry, I didn\'t understand the date ' + command[i] +
+                              '. Make sure you are using proper date like 2018-08-27!');
+                          return;
+                        } else {
+                          state === 'BEFORE' ? before = dateToParse : after = dateToParse;
+                        }
+                      }
+                      break;
+                    default:
+                      throw new Error('Unrecognised state ' + state);
+                  }
+                }
+              }
+
+              // We've made it this far with no errors, generate the export
+              let dataset = scraps.chain().find({'authorId': {'$eq': userId}});
+              if (withUsers.length > 0) dataset = dataset.find({'snappedBy': {'$containsAny': withUsers}});
+              if (withoutUsers.length > 0) dataset = dataset.find({'snappedBy': {'$containsNone': withoutUsers}});
+              if (before) dataset = dataset.find({'quoteOn': {'$lte': before}});
+              if (after) dataset = dataset.find({'quoteOn': {'$gte': after}});
+              let results = dataset.simplesort('quoteOn', true).data();
+              // Now that we have the result set, build our response
+              if (results.length === 0) {
+                message.channel.send('No results returned! Time to get snapping! 📸');
+              } else {
+                message.channel.send('Exporting results! (this might take a while ...)').then(msg => {
+                  createAndSendExport(results, scrapbookChannel, message.channel);
+                });
+              }
+            } else {
+              message.channel.send('Sorry, I don\'t know someone called ' + command[2] +
+                '. Make sure you are using a proper user mention! Don\'t worry about pinging them, I\'m sure it\'ll be fine ;)');
+            }
+          } else {
+            message.channel.send('Who do you want me to export? :3');
+          }
+          break;
         case 'help':
           let msg = '';
           msg += reactThreshold + ' 📸 react' + (reactThreshold === 1 ? '' : 's') + ' and I\'ll save the post. React with 👍 to show some love!\n';
-          msg += 'Here\'s what I know: *ahem*\n';
-          msg += '**- posts** shows the top 3 posts of all time\n';
-          msg += '**- me** shows your top 3 posts (of all time)\n';
-          msg += '**- snaps** shows a leaderboard for most snapped users\n';
-          msg += '**- likes** shows a leaderboard for collective likes on snaps\n';
+          if (funPolice) {
+            msg += 'Since the Fun Police came and confiscated all my score boards, I only have one non-help command left. I hope you like it. ;~;\n';
+          } else {
+            msg += 'Here\'s what I know: *ahem*\n';
+            msg += '**- posts** shows the top 3 posts of all time\n';
+            msg += '**- me** shows your top 3 posts (of all time)\n';
+            msg += '**- snaps** shows a leaderboard for most snapped users\n';
+            msg += '**- likes** shows a leaderboard for collective likes on snaps\n';
+          }
+          msg += '**- export <mention>** fetches all the quotes for the specified user. This can be modified using additional parameters:\n';
+          msg += '*- with <mention> <mention> ...* only exports quotes where the mentioned users took the snap\n';
+          msg += '*- without <mention> <mention> ...* ignores quotes where the mentioned users took the snap (*and you give yourself away*)\n';
+          msg += '*- before <YYYY-MM-DD>* only exports quotes said before the provided date\n';
+          msg += '*- after <YYYY-MM-DD>* only exports quotes said after the provided date\n';
           msg += 'Oh, and **help** shows you this, aheh uwu';
           message.channel.send(msg);
       }
     } else {
-      message.reply('👋');
+      message.reply('hey qt! 👋');
     }
   }
 });
+
+async function createAndSendExport (results, scrapChannel, channelToSend) {
+  let exportText = '... plus more in the export!';
+  let msgText = null;
+  let currentText = '';
+  for (let i = 0; i < results.length; i++) {
+    let result = results[i];
+    let msg;
+    try {
+      let retrievedMsg = await scrapChannel.fetchMessage(result.botMessageId);
+      msg = retrievedMsg.embeds[0];
+    } catch (e) {
+      msg = {description: '<my snap deleted> 😭'};
+    }
+    let messageToAppend = '#' + (i + 1) + ' - ' + (msg.description || '*no text*');
+    if (msg.image) messageToAppend += ' - ' + msg.image.url;
+    messageToAppend += '\n';
+    if (messageToAppend.length + currentText.length + exportText.length > 2000 && !msgText) {
+      // Big boi, scale him down
+      if (currentText) {
+        msgText = currentText + exportText;
+      } else {
+        msgText = 'Unfortunately, the first quote in this result set is too big, so I can\'t give you a preview! A suspenseful export indeed!';
+      }
+    }
+    currentText += messageToAppend;
+  }
+  // end of results
+  if (msgText) {
+    // Needs an export
+    let filename = 'export4qt_' + Date.now() + '.txt';
+    channelToSend.send(msgText, {
+      file: {
+        attachment: Buffer.from(currentText),
+        name: filename
+      }
+    });
+  } else {
+    // Can send like this
+    channelToSend.send(currentText);
+  }
+}
+
+function getUserFromMention (mention) {
+  return mention.replace(/[<@!>]/g, '');
+}
 
 function createScoreboard (scores, title) {
   let sorted = scores.sort((a, b) => b.score - a.score);
@@ -92,6 +240,7 @@ function createScoreboard (scores, title) {
   return new Discord.RichEmbed().setTitle(title).setDescription(desc).setColor('RANDOM');
 }
 
+// RECURSIVE >:(
 function sendEmbedList (results, channel, scrapChannel, count) {
   if (results.length === 0) return;
   let result = results.shift();
@@ -158,6 +307,9 @@ function handleReaction (messageReaction) {
             originalMessageId: messageReaction.message.id,
             authorId: messageReaction.message.author.id,
             channelId: messageReaction.message.channel.id,
+            guildId: messageReaction.message.guild.id,
+            snappedBy: Array.from(messageReaction.users.keys()),
+            quoteOn: messageReaction.message.createdTimestamp,
             likes: 1
           });
           db.saveDatabase();
