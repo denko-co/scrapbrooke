@@ -301,17 +301,20 @@ function handleReaction (messageReaction) {
       if (messageReaction.count >= reactThreshold && !messageInfo) {
         // New snap taken, post it!
         let msg = createEmbed(messageReaction.message);
+        // Need to insert before posting to stop duplicates due to weaving
+        let insertedRecord = scraps.insert({
+          botMessageId: null,
+          originalMessageId: messageReaction.message.id,
+          authorId: messageReaction.message.author.id,
+          channelId: messageReaction.message.channel.id,
+          guildId: messageReaction.message.guild.id,
+          snappedBy: Array.from(messageReaction.users.keys()),
+          quoteOn: messageReaction.message.createdTimestamp,
+          likes: 1
+        });
+        db.saveDatabase();
         scrapbookChannel.send(msg.content, {embed: msg.embed}).then(botMessage => {
-          scraps.insert({
-            botMessageId: botMessage.id,
-            originalMessageId: messageReaction.message.id,
-            authorId: messageReaction.message.author.id,
-            channelId: messageReaction.message.channel.id,
-            guildId: messageReaction.message.guild.id,
-            snappedBy: Array.from(messageReaction.users.keys()),
-            quoteOn: messageReaction.message.createdTimestamp,
-            likes: 1
-          });
+          insertedRecord.botMessageId = botMessage.id;
           db.saveDatabase();
           botMessage.react('👍');
         });
