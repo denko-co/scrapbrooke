@@ -2,7 +2,7 @@ const Discord = require('discord.js');
 const Loki = require('lokijs');
 const bot = new Discord.Client({autoReconnect: true});
 const reactThreshold = 1;
-const funPolice = true;
+const funPolice = false;
 // const timeTillLate = 86400; // One day
 const events = {
   MESSAGE_REACTION_ADD: 'messageReactionAdd',
