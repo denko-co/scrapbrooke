@@ -9,6 +9,7 @@ const events = {
   MESSAGE_REACTION_REMOVE: 'messageReactionRemove'
 };
 let initalised = false;
+let fetched = false;
 let db;
 
 init(function (err) {
@@ -23,11 +24,19 @@ bot.login(process.env.TOKEN);
 
 bot.on('ready', function (event) {
   console.log('Logged in as %s - %s\n', bot.user.username, bot.user.id);
+  // Before we start, fetch all the users in our db to avoid explosions
+  let allPosts = db.getCollection('scraps').chain().data();
+  let userFetches = allPosts.map(post => bot.fetchUser(post.authorId));
+  Promise.all(userFetches).then(() => {
+    fetched = true;
+    console.log('Fetch complete!');
+  }).catch(err => console.log(err));
 });
 
 bot.on('message', function (message) {
   // Handle commands
   if (!message.author.bot) {
+    if (!fetched) return; // Don't run any commands if we haven't done a full fetch
     let guild = message.guild;
     if (!guild) return;
     let scrapbookChannel = guild.channels.find(channel => channel.name === 'scrapbook');
@@ -51,15 +60,19 @@ bot.on('message', function (message) {
         case 'snaps':
           let snappedUsers = groupByArray(scraps.chain().data(), 'authorId');
           let snappedScores = snappedUsers.map(user => {
-            return {user: guild.member(bot.users.get(user.key)).displayName, score: user.values.length};
+            let baseUser = bot.users.get(user.key);
+            let guildUser = guild.member(baseUser);
+            return {user: guildUser ? guildUser.displayName : baseUser.username, score: user.values.length};
           });
           message.channel.send('', {embed: createScoreboard(snappedScores, 'Users most snapped')});
           break;
         case 'likes':
           let scoredUsers = groupByArray(scraps.chain().data(), 'authorId');
           let scoredScores = scoredUsers.map(user => { // I really do crack myself up sometimes
+            let baseUser = bot.users.get(user.key);
+            let guildUser = guild.member(bot.users.get(user.key));
             return {
-              user: guild.member(bot.users.get(user.key)).displayName,
+              user: guildUser ? guildUser.displayName : baseUser.username,
               score: user.values.reduce(function (current, ele) {
                 return current + ele.likes;
               }, 0)};
@@ -77,7 +90,7 @@ bot.on('message', function (message) {
           if (command[2]) {
             // Check if user
             let userId = getUserFromMention(command[2]);
-            let user = guild.member(getUserFromMention(userId));
+            let user = bot.users.get(getUserFromMention(userId));
             if (user) {
               // Ready to rock, try to parse...
               let state = 'EXPORT';
@@ -91,7 +104,7 @@ bot.on('message', function (message) {
                   state = com;
                 } else {
                   let mentionedUserId = getUserFromMention(command[i]);
-                  let mentionedUser = guild.member(mentionedUserId);
+                  let mentionedUser = bot.users.get(mentionedUserId);
                   switch (state) {
                     case 'EXPORT':
                       if (mentionedUser) {
@@ -353,7 +366,8 @@ function createEmbed (message) {
   }
 
   // Guild is present here, will work but just in case
-  let author = message.guild ? message.guild.member(message.author).displayName : message.author.username;
+  let guildRefToUser = message.guild ? message.guild.member(message.author) : null;
+  let author = guildRefToUser ? guildRefToUser.displayName : message.author.username;
   embed.setAuthor(author, message.author.displayAvatarURL);
   embed.setTimestamp(message.createdAt);
   // rip u
