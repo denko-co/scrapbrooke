@@ -26,11 +26,13 @@ bot.on('ready', function (event) {
   console.log('Logged in as %s - %s\n', bot.user.username, bot.user.id);
   // Before we start, fetch all the users in our db to avoid explosions
   let allPosts = db.getCollection('scraps').chain().data();
-  let userFetches = allPosts.map(post => bot.fetchUser(post.authorId));
-  Promise.all(userFetches).then(() => {
-    fetched = true;
-    console.log('Fetch complete!');
-  }).catch(err => console.log(err));
+  let userFetches = allPosts.map(post => bot.fetchUser(post.authorId).catch(err => err));
+  Promise.all(userFetches)
+    .then(() => {
+      console.log('Fetch completed!');
+      fetched = true;
+    })
+    .catch(err => console.log(err));
 });
 
 bot.on('message', function (message) {
@@ -60,19 +62,15 @@ bot.on('message', function (message) {
         case 'snaps':
           let snappedUsers = groupByArray(scraps.chain().data(), 'authorId');
           let snappedScores = snappedUsers.map(user => {
-            let baseUser = bot.users.get(user.key);
-            let guildUser = guild.member(baseUser);
-            return {user: guildUser ? guildUser.displayName : baseUser.username, score: user.values.length};
+            return {user: getDisplayName(user.key, guild), score: user.values.length};
           });
           message.channel.send('', {embed: createScoreboard(snappedScores, 'Users most snapped')});
           break;
         case 'likes':
           let scoredUsers = groupByArray(scraps.chain().data(), 'authorId');
           let scoredScores = scoredUsers.map(user => { // I really do crack myself up sometimes
-            let baseUser = bot.users.get(user.key);
-            let guildUser = guild.member(bot.users.get(user.key));
             return {
-              user: guildUser ? guildUser.displayName : baseUser.username,
+              user: getDisplayName(user.key, guild),
               score: user.values.reduce(function (current, ele) {
                 return current + ele.likes;
               }, 0)};
@@ -90,7 +88,7 @@ bot.on('message', function (message) {
           if (command[2]) {
             // Check if user
             let userId = getUserFromMention(command[2]);
-            let user = bot.users.get(getUserFromMention(userId));
+            let user = bot.users.get(getUserFromMention(userId)) || isKnownUser(userId);
             if (user) {
               // Ready to rock, try to parse...
               let state = 'EXPORT';
@@ -104,7 +102,7 @@ bot.on('message', function (message) {
                   state = com;
                 } else {
                   let mentionedUserId = getUserFromMention(command[i]);
-                  let mentionedUser = bot.users.get(mentionedUserId);
+                  let mentionedUser = bot.users.get(mentionedUserId) || isKnownUser(mentionedUserId);
                   switch (state) {
                     case 'EXPORT':
                       if (mentionedUser) {
@@ -248,7 +246,7 @@ function createScoreboard (scores, title) {
   let sorted = scores.sort((a, b) => b.score - a.score);
   let desc = '';
   sorted.forEach(user => {
-    desc += `⭐ (\`${user.score}\`) **${user.user.substring(0, 24)}**\n`;
+    desc += `⭐ (\`${user.score}\`) **${user.user.substring(0, 26)}**\n`;
   });
   return new Discord.RichEmbed().setTitle(title).setDescription(desc).setColor('RANDOM');
 }
@@ -365,14 +363,19 @@ function createEmbed (message) {
     }
   }
 
-  // Guild is present here, will work but just in case
-  let guildRefToUser = message.guild ? message.guild.member(message.author) : null;
-  let author = guildRefToUser ? guildRefToUser.displayName : message.author.username;
-  embed.setAuthor(author, message.author.displayAvatarURL);
+  // Should not get unknown user from this, and guild should be here
+  embed.setAuthor(getDisplayName(message.author, message.guild), message.author.displayAvatarURL);
   embed.setTimestamp(message.createdAt);
   // rip u
   embed.setColor('RANDOM');
   return {content: content, embed: embed};
+}
+
+function getDisplayName (userRef, guild) {
+  let userId = userRef.id || userRef;
+  let baseUser = bot.users.get(userId);
+  let guildUser = guild ? guild.member(baseUser) : null;
+  return guildUser ? guildUser.displayName : baseUser ? baseUser.username : '👻 ID: ' + userId;
 }
 
 function endsWithAny (string, array) {
@@ -390,6 +393,11 @@ function groupByArray (xs, key) {
     if (el) { el.values.push(x); } else { rv.push({ key: v, values: [x] }); }
     return rv;
   }, []);
+}
+
+function isKnownUser (userId) {
+  // dumpster dive
+  return db.getCollection('scraps').chain().where(obj => obj.authorId === userId || obj.snappedBy.includes(userId)).data().length > 0;
 }
 
 function init (callback) {
