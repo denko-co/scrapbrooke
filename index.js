@@ -297,6 +297,8 @@ bot.on('messageReactionRemove', function (messageReaction, user) {
   handleReaction(messageReaction, user);
 });
 
+bot.on('error', e => console.error(e));
+
 function handleReaction (messageReaction, user) {
   if (!['📸', '👍'].includes(messageReaction.emoji.name)) return;
   let guild = messageReaction.message.guild;
