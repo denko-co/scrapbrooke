@@ -368,28 +368,33 @@ function handleReaction (messageReaction, user) {
 
 function createEmbed (message) {
   // Converted and modified version of https://github.com/Rapptz/RoboDanny/blob/rewrite/cogs/stars.py#L168
-  let embed = new Discord.RichEmbed();
-  embed.setDescription(message.content);
+  // Includes my own mod to repost an embed if snapped
+  let origEmbed = message.embeds[0];
+  let embed = new Discord.RichEmbed(origEmbed);
   let content = `📸 ${message.channel} ${getMessageLink(message.guild, message.channel, message)}`;
 
-  if (message.embeds.length > 0) {
-    let data = message.embeds[0];
-    if (data.type === 'image') {
-      embed.setImage(data.url);
+  if (!origEmbed) {
+    embed.setDescription(message.content);
+  } else if (message.content !== '') {
+    if (message.content.length <= 1024 && origEmbed.fields.length < 25) {
+      embed.addField('Original Embed Message', message.content);
+    } else {
+      content += ' - original embed message content removed';
     }
   }
 
   let file = message.attachments.first();
   if (file) {
-    if (endsWithAny(file.url.toLowerCase(), ['png', 'jpeg', 'jpg', 'gif', 'webp'])) {
+    if (endsWithAny(file.url.toLowerCase(), ['png', 'jpeg', 'jpg', 'gif', 'webp']) && !origEmbed) {
       embed.setImage(file.url);
     } else {
+      // Either we can't read it or we are adding to an old embed
       embed.addField('Attachment', `[${file.filename}](${file.url})`);
     }
   }
 
   // Should not get unknown user from this, and guild should be here
-  embed.setAuthor(getDisplayName(message.author, message.guild), message.author.displayAvatarURL);
+  if (!embed.author) embed.setAuthor(getDisplayName(message.author, message.guild), message.author.displayAvatarURL);
   embed.setTimestamp(message.createdAt);
   // rip u
   embed.setColor('RANDOM');
