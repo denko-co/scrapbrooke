@@ -80,7 +80,7 @@ bot.on('message', function (message) {
           let snappedScores = snappedUsers.map(user => {
             return {user: getDisplayName(user.key, guild), score: user.values.length};
           });
-          message.channel.send('', {embed: createScoreboard(snappedScores, 'Users most snapped')});
+          message.channel.send('', {embed: createScoreboard(snappedScores, 'Users most snapped', '📸')});
           break;
         case 'likes':
           let scoredUsers = groupByArray(scraps.chain().data(), 'authorId');
@@ -91,7 +91,7 @@ bot.on('message', function (message) {
                 return current + ele.likes;
               }, 0)};
           });
-          message.channel.send('', {embed: createScoreboard(scoredScores, 'Most liked users')});
+          message.channel.send('', {embed: createScoreboard(scoredScores, 'Most liked users', '👍')});
           break;
         case 'me':
           let myresults = scraps.chain().find({authorId: message.author.id}).simplesort('likes', true).limit(3).data();
@@ -260,11 +260,11 @@ function getUserFromMention (mention) {
   return mention.replace(/[<@!>]/g, '');
 }
 
-function createScoreboard (scores, title) {
+function createScoreboard (scores, title, icon) {
   let sorted = scores.sort((a, b) => b.score - a.score);
   let desc = '';
   sorted.forEach(user => {
-    desc += `⭐ (\`${user.score}\`) **${user.user.substring(0, 26)}**\n`;
+    desc += `${icon || '⭐'} (\`${user.score}\`) **${user.user.substring(0, 26)}**\n`;
   });
   return new Discord.RichEmbed().setTitle(title).setDescription(desc).setColor('RANDOM');
 }
