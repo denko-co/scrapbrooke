@@ -50,11 +50,17 @@ bot.on('ready', function (event) {
     })
     .catch(err => winston.error(err));
 
+  // As long as the bot is online, the likes will be correct
+  // However, when it goes offline, we may have missed something
+  // Run this resync every once and a while just to make sure we're looking good ;)
+  /*
   allPosts.forEach(post => {
     const guild = bot.guilds.get(post.guildId);
     const ch = guild.channels.find(channel => channel.name === 'scrapbook');
     ch.fetchMessage(post.botMessageId).then(bmsg => {
       // Calculate net likes
+
+      // I don't know if this fetch actually needs to be in here
       let messageInfo = db.getCollection('scraps').findOne({'botMessageId': post.botMessageId});
       let reactions = bmsg.reactions;
       let likes = reactions.get('👍');
@@ -62,8 +68,9 @@ bot.on('ready', function (event) {
       let netLikes = (likes ? likes.count : 0) - (dislikes ? dislikes.count : 0);
       messageInfo.likes = netLikes;
       db.saveDatabase();
-    }).catch(err => { });
+    }).catch(err => winston.error(err));
   });
+  */
 });
 
 bot.on('message', function (message) {
