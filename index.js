@@ -49,6 +49,11 @@ bot.on('ready', function (event) {
       fetched = true;
     })
     .catch(err => winston.error(err));
+
+  allPosts.forEach(post => {
+    const ch = bot.channels.get(post.channelId);
+    ch.fetchMessage(post.botMessageId).then(bmsg => bmsg.react('👎').catch(err => {}));
+  });
 });
 
 bot.on('message', function (message) {
@@ -323,7 +328,7 @@ bot.on('messageReactionRemove', function (messageReaction, user) {
 bot.on('error', err => winston.error(err));
 
 function handleReaction (messageReaction, user) {
-  if (!['📸', '👍'].includes(messageReaction.emoji.name)) return;
+  if (!['📸', '👍', '👎'].includes(messageReaction.emoji.name)) return;
   let guild = messageReaction.message.guild;
   if (!guild) return;
   let scrapbookChannel = guild.channels.find(channel => channel.name === 'scrapbook');
@@ -348,20 +353,26 @@ function handleReaction (messageReaction, user) {
           guildId: messageReaction.message.guild.id,
           snappedBy: users,
           quoteOn: messageReaction.message.createdTimestamp,
-          likes: 1
+          likes: 0
         });
         db.saveDatabase();
         scrapbookChannel.send(msg.content, {embed: msg.embed}).then(botMessage => {
           insertedRecord.botMessageId = botMessage.id;
           db.saveDatabase();
-          botMessage.react('👍');
+          botMessage.react('👍').then(msg => botMessage.react('👎'));
         });
       }
       break;
     case '👍':
+    case '👎':
       messageInfo = db.getCollection('scraps').findOne({'botMessageId': messageReaction.message.id});
       if (!messageInfo) return;
-      messageInfo.likes = messageReaction.count;
+      // Calculate net likes
+      let reactions = messageReaction.message.reactions;
+      let likes = reactions.get('👍');
+      let dislikes = reactions.get('👎');
+      let netLikes = (likes ? likes.count : 0) - (dislikes ? dislikes.count : 0);
+      messageInfo.likes = netLikes;
       db.saveDatabase();
   }
 }
