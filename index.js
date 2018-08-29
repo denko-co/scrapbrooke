@@ -227,11 +227,11 @@ async function createAndSendExport (results, scrapChannel, channelToSend) {
     try {
       let retrievedMsg = await scrapChannel.fetchMessage(result.botMessageId);
       msg = retrievedMsg.embeds[0];
-      link = ` ${getMessageLink(scrapChannel.guild, scrapChannel, retrievedMsg)}`;
+      link = getMessageLink(scrapChannel.guild, scrapChannel, retrievedMsg);
     } catch (e) {
       msg = {description: '<my snap deleted> 😭'};
     }
-    let messageToAppend = `#${i + 1} - ${msg.description || '*no text*'}${link}`;
+    let messageToAppend = `#${i + 1} - ${msg.description || '*no text*'} ${link}`;
     if (msg.image) messageToAppend += ` - ${msg.image.url}`;
     messageToAppend += '\n';
     if (messageToAppend.length + currentText.length + exportText.length > 2000 && !msgText) {
