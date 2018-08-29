@@ -64,14 +64,27 @@ bot.on('message', function (message) {
     if (command[1]) {
       let scraps = db.getCollection('scraps');
       let lCommand = command[1].toLowerCase();
-      if (['posts', 'snaps', 'likes', 'me'].includes(lCommand) && funPolice) {
+      if (['top', 'snaps', 'likes'].includes(lCommand) && funPolice) {
         message.channel.send(';~;');
         return;
       }
       switch (lCommand) {
-        case 'posts':
-          let results = scraps.chain().simplesort('likes', true).limit(3).data();
-          message.channel.send('Here are the top 3 most popular snaps of all time. *ahem*').then(msg => {
+        case 'top':
+          let results = scraps.chain();
+          if (command[2]) {
+            let userId = getUserFromMention(command[2]);
+            let user = bot.users.get(userId) || isKnownUser(userId);
+            if (user) {
+              results = results.find({'authorId': {'$eq': userId}});
+            } else {
+              message.channel.send('Sorry, I don\'t know someone called ' + command[2] +
+                '. Make sure you are using a proper user mention! Don\'t worry about pinging them, I\'m sure it\'ll be fine ;)');
+              return;
+            }
+          }
+          results = results.sort((a, b) => a.likes === b.likes ? b.quoteOn - a.quoteOn : b.likes - a.likes).limit(3).data();
+          let forText = command[2] ? 'for ' + command[2] : 'of all time';
+          message.channel.send('Here are the top 3 most popular snaps ' + forText + '. *ahem*').then(msg => {
             sendEmbedList(results, message.channel, scrapbookChannel, 1);
           });
           break;
@@ -92,12 +105,6 @@ bot.on('message', function (message) {
               }, 0)};
           });
           message.channel.send('', {embed: createScoreboard(scoredScores, 'Most liked users', '👍')});
-          break;
-        case 'me':
-          let myresults = scraps.chain().find({authorId: message.author.id}).simplesort('likes', true).limit(3).data();
-          message.channel.send('Here are your top 3 most popular snaps. *ahem*').then(msg => {
-            sendEmbedList(myresults, message.channel, scrapbookChannel, 1);
-          });
           break;
         case 'export':
           // Let's go!
@@ -193,8 +200,7 @@ bot.on('message', function (message) {
             msg += 'Since the Fun Police came and confiscated all my score boards, I only have one non-help command left. I hope you like it. ;~;\n';
           } else {
             msg += 'Here\'s what I know: *ahem*\n';
-            msg += '**- posts** shows the top 3 posts of all time\n';
-            msg += '**- me** shows your top 3 posts (of all time)\n';
+            msg += '**- top (<mention>)** shows the top 3 posts of all time, or for a user if mentioned\n';
             msg += '**- snaps** shows a leaderboard for most snapped users\n';
             msg += '**- likes** shows a leaderboard for collective likes on snaps\n';
           }
