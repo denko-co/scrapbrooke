@@ -49,12 +49,6 @@ bot.on('ready', function (event) {
       fetched = true;
     })
     .catch(err => winston.error(err));
-
-  allPosts.forEach(post => {
-    const guild = bot.guilds.get(post.guildId);
-    const ch = guild.channels.find(channel => channel.name === 'scrapbook');
-    ch.fetchMessage(post.botMessageId).then(bmsg => bmsg.react('👎').catch(err => {}));
-  });
 });
 
 bot.on('message', function (message) {
