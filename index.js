@@ -36,14 +36,14 @@ init(function (err) {
 bot.login(process.env.TOKEN);
 
 bot.on('ready', function (event) {
-  winston.info('Logged in as ' + bot.user.username + ' - ' + bot.user.id);
+  winston.info(`Logged in as ${bot.user.username} - ${bot.user.id}`);
   // Before we start, fetch all the users in our db to avoid explosions
   let allPosts = db.getCollection('scraps').chain().data();
   let userFetches = allPosts.map(post => bot.fetchUser(post.authorId).catch(err => err));
   Promise.all(userFetches)
     .then(results => {
       results.forEach(result => {
-        if (result instanceof Error) winston.error('Fetch error encountered: ' + result);
+        if (result instanceof Error) winston.error(`Fetch error encountered: ${result}`);
       });
       winston.info('Fetch completed!');
       fetched = true;
@@ -77,14 +77,14 @@ bot.on('message', function (message) {
             if (user) {
               results = results.find({'authorId': {'$eq': userId}});
             } else {
-              message.channel.send('Sorry, I don\'t know someone called ' + command[2] +
-                '. Make sure you are using a proper user mention! Don\'t worry about pinging them, I\'m sure it\'ll be fine ;)');
+              message.channel.send(`Sorry, I don't know someone called ${command[2]}. ` +
+                `Make sure you are using a proper user mention! Don't worry about pinging them, I'm sure it'll be fine ;)`);
               return;
             }
           }
           results = results.sort((a, b) => a.likes === b.likes ? b.quoteOn - a.quoteOn : b.likes - a.likes).limit(3).data();
-          let forText = command[2] ? 'for ' + command[2] : 'of all time';
-          message.channel.send('Here are the top 3 most popular snaps ' + forText + '. *ahem*').then(msg => {
+          let forText = command[2] ? `for ${command[2]}` : 'of all time';
+          message.channel.send(`Here are the top 3 most popular snaps ${forText}. *ahem*`).then(msg => {
             sendEmbedList(results, message.channel, scrapbookChannel, 1);
           });
           break;
@@ -129,11 +129,10 @@ bot.on('message', function (message) {
                   switch (state) {
                     case 'EXPORT':
                       if (mentionedUser) {
-                        message.channel.send('Can\'t export multiple users at once!' +
-                        ' I don\'t make the rules, I just think them up and write them down.');
+                        message.channel.send(`Can't export multiple users at once! ` +
+                          `I don't make the rules, I just think them up and write them down.`);
                       } else {
-                        message.channel.send('Sorry, if ' + command[i] + ' is a command I don\'t know it.' +
-                          ' Maybe you need some help? uwu');
+                        message.channel.send(`Sorry, if ${command[i]} is a command I don't know it. Maybe you need some help? uwu`);
                       }
                       return;
                     case 'WITH':
@@ -142,8 +141,8 @@ bot.on('message', function (message) {
                         let arr = state === 'WITH' ? withUsers : withoutUsers;
                         arr.push(mentionedUserId);
                       } else {
-                        message.channel.send('Sorry, I don\'t know someone called ' + command[i] +
-                          '. Make sure you are using a proper user mention! Don\'t worry about pinging them, I\'m sure it\'ll be fine ;)');
+                        message.channel.send(`Sorry, I don't know someone called ${command[i]}. ` +
+                          `Make sure you are using a proper user mention! Don't worry about pinging them, I'm sure it'll be fine ;)`);
                         return;
                       }
                       break;
@@ -151,13 +150,12 @@ bot.on('message', function (message) {
                     case 'AFTER':
                       let date = state === 'BEFORE' ? before : after;
                       if (date) {
-                        message.channel.send('You know that ' + state + ' only takes one param, right? >w<');
+                        message.channel.send(`You know that ${state} only takes one param, right? >w<`);
                         return;
                       } else {
                         let dateToParse = Date.parse(command[i]);
                         if (isNaN(dateToParse)) {
-                          message.channel.send('Sorry, I didn\'t understand the date ' + command[i] +
-                              '. Make sure you are using proper date like 2018-08-27!');
+                          message.channel.send(`Sorry, I didn't understand the date ${command[i]}. Make sure you are using proper date like 2018-08-27!`);
                           return;
                         } else {
                           state === 'BEFORE' ? before = dateToParse : after = dateToParse;
@@ -165,7 +163,7 @@ bot.on('message', function (message) {
                       }
                       break;
                     default:
-                      throw new Error('Unrecognised state ' + state);
+                      throw new Error(`Unrecognised state ${state}`);
                   }
                 }
               }
@@ -186,8 +184,8 @@ bot.on('message', function (message) {
                 });
               }
             } else {
-              message.channel.send('Sorry, I don\'t know someone called ' + command[2] +
-                '. Make sure you are using a proper user mention! Don\'t worry about pinging them, I\'m sure it\'ll be fine ;)');
+              message.channel.send(`Sorry, I don't know someone called ${command[2]}. ` +
+                `Make sure you are using a proper user mention! Don't worry about pinging them, I'm sure it'll be fine ;)`);
             }
           } else {
             message.channel.send('Who do you want me to export? :3');
@@ -195,7 +193,7 @@ bot.on('message', function (message) {
           break;
         case 'help':
           let msg = '';
-          msg += reactThreshold + ' 📸 react' + (reactThreshold === 1 ? '' : 's') + ' and I\'ll save the post. React with 👍 to show some love!\n';
+          msg += `${reactThreshold} 📸 react${reactThreshold === 1 ? '' : 's'} and I'll save the post. React with 👍 to show some love!\n`;
           if (funPolice) {
             msg += 'Since the Fun Police came and confiscated all my score boards, I only have one non-help command left. I hope you like it. ;~;\n';
           } else {
@@ -229,12 +227,12 @@ async function createAndSendExport (results, scrapChannel, channelToSend) {
     try {
       let retrievedMsg = await scrapChannel.fetchMessage(result.botMessageId);
       msg = retrievedMsg.embeds[0];
-      link = ' ' + getMessageLink(scrapChannel.guild, scrapChannel, retrievedMsg);
+      link = ` ${getMessageLink(scrapChannel.guild, scrapChannel, retrievedMsg)}`;
     } catch (e) {
       msg = {description: '<my snap deleted> 😭'};
     }
-    let messageToAppend = '#' + (i + 1) + ' - ' + (msg.description || '*no text*') + link;
-    if (msg.image) messageToAppend += ' - ' + msg.image.url;
+    let messageToAppend = `#${i + 1} - ${msg.description || '*no text*'}${link}`;
+    if (msg.image) messageToAppend += ` - ${msg.image.url}`;
     messageToAppend += '\n';
     if (messageToAppend.length + currentText.length + exportText.length > 2000 && !msgText) {
       // Big boi, scale him down
@@ -249,7 +247,7 @@ async function createAndSendExport (results, scrapChannel, channelToSend) {
   // end of results
   if (msgText) {
     // Needs an export
-    let filename = 'export4qt_' + Date.now() + '.txt';
+    let filename = `export4qt_${Date.now()}.txt`;
     channelToSend.send(msgText, {
       file: {
         attachment: Buffer.from(currentText),
@@ -402,7 +400,7 @@ function getDisplayName (userRef, guild) {
   let userId = userRef.id || userRef;
   let baseUser = bot.users.get(userId);
   let guildUser = guild ? guild.member(baseUser) : null;
-  return guildUser ? guildUser.displayName : baseUser ? baseUser.username : '👻 ID: ' + userId;
+  return guildUser ? guildUser.displayName : baseUser ? baseUser.username : `👻 ID: ${userId}`;
 }
 
 function endsWithAny (string, array) {
