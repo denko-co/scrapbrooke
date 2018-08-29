@@ -49,6 +49,21 @@ bot.on('ready', function (event) {
       fetched = true;
     })
     .catch(err => winston.error(err));
+
+  allPosts.forEach(post => {
+    const guild = bot.guilds.get(post.guildId);
+    const ch = guild.channels.find(channel => channel.name === 'scrapbook');
+    ch.fetchMessage(post.botMessageId).then(bmsg => {
+      // Calculate net likes
+      let messageInfo = db.getCollection('scraps').findOne({'botMessageId': post.botMessageId});
+      let reactions = bmsg.reactions;
+      let likes = reactions.get('👍');
+      let dislikes = reactions.get('👎');
+      let netLikes = (likes ? likes.count : 0) - (dislikes ? dislikes.count : 0);
+      messageInfo.likes = netLikes;
+      db.saveDatabase();
+    }).catch(err => { });
+  });
 });
 
 bot.on('message', function (message) {
@@ -317,12 +332,12 @@ bot.on('messageReactionAdd', function (messageReaction, user) {
 });
 
 bot.on('messageReactionRemove', function (messageReaction, user) {
-  handleReaction(messageReaction, user);
+  handleReaction(messageReaction, user, true);
 });
 
 bot.on('error', err => winston.error(err));
 
-function handleReaction (messageReaction, user) {
+function handleReaction (messageReaction, user, removed) {
   if (!['📸', '👍', '👎'].includes(messageReaction.emoji.name)) return;
   let guild = messageReaction.message.guild;
   if (!guild) return;
@@ -362,12 +377,10 @@ function handleReaction (messageReaction, user) {
     case '👎':
       messageInfo = db.getCollection('scraps').findOne({'botMessageId': messageReaction.message.id});
       if (!messageInfo) return;
-      // Calculate net likes
-      let reactions = messageReaction.message.reactions;
-      let likes = reactions.get('👍');
-      let dislikes = reactions.get('👎');
-      let netLikes = (likes ? likes.count : 0) - (dislikes ? dislikes.count : 0);
-      messageInfo.likes = netLikes;
+      // Bump or unbump likes based on the event
+      let direction = messageReaction.emoji.name === '👍' ? 1 : -1;
+      let effect = removed ? -1 : 1;
+      messageInfo.likes = messageInfo.likes + (direction * effect);
       db.saveDatabase();
   }
 }
