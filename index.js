@@ -51,7 +51,8 @@ bot.on('ready', function (event) {
     .catch(err => winston.error(err));
 
   allPosts.forEach(post => {
-    const ch = bot.channels.get(post.channelId);
+    const guild = bot.guilds.get(post.guildId);
+    const ch = guild.channels.find(channel => channel.name === 'scrapbook');
     ch.fetchMessage(post.botMessageId).then(bmsg => bmsg.react('👎').catch(err => {}));
   });
 });
