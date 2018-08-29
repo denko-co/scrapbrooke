@@ -1,5 +1,6 @@
 const Discord = require('discord.js');
 const Loki = require('lokijs');
+const winston = require('winston');
 const bot = new Discord.Client({autoReconnect: true});
 const reactThreshold = 1;
 const funPolice = false;
@@ -12,27 +13,42 @@ let initalised = false;
 let fetched = false;
 let db;
 
+winston.configure({
+  level: 'info',
+  transports: [
+    new winston.transports.Console(),
+    new winston.transports.File({ filename: 'combined.log' })
+  ],
+  exceptionHandlers: [
+    new winston.transports.Console(),
+    new winston.transports.File({ filename: 'exception.log' })
+  ]
+});
+
 init(function (err) {
   if (err) {
-    console.log(err);
+    winston.error(err);
     process.exit(1);
   }
-  console.log('Ready to rock!');
+  winston.info('Ready to rock!');
 });
 
 bot.login(process.env.TOKEN);
 
 bot.on('ready', function (event) {
-  console.log('Logged in as %s - %s\n', bot.user.username, bot.user.id);
+  winston.info('Logged in as ' + bot.user.username + ' - ' + bot.user.id);
   // Before we start, fetch all the users in our db to avoid explosions
   let allPosts = db.getCollection('scraps').chain().data();
   let userFetches = allPosts.map(post => bot.fetchUser(post.authorId).catch(err => err));
   Promise.all(userFetches)
-    .then(() => {
-      console.log('Fetch completed!');
+    .then(results => {
+      results.forEach(result => {
+        if (result instanceof Error) winston.error('Fetch error encountered: ' + result);
+      });
+      winston.info('Fetch completed!');
       fetched = true;
     })
-    .catch(err => console.log(err));
+    .catch(err => winston.error(err));
 });
 
 bot.on('message', function (message) {
@@ -260,7 +276,7 @@ function sendEmbedList (results, channel, scrapChannel, count) {
       sendEmbedList(results, channel, scrapChannel, count + 1);
     });
   }).catch(err => {
-    console.log(err);
+    winston.error(err);
     channel.send(`#${count} - ${result.likes} like${result.likes === 1 ? '' : 's'} - <my snap deleted> 😭`).then(msg => {
       sendEmbedList(results, channel, scrapChannel, count + 1);
     });
@@ -297,7 +313,7 @@ bot.on('messageReactionRemove', function (messageReaction, user) {
   handleReaction(messageReaction, user);
 });
 
-bot.on('error', e => console.error(e));
+bot.on('error', err => winston.error(err));
 
 function handleReaction (messageReaction, user) {
   if (!['📸', '👍'].includes(messageReaction.emoji.name)) return;
@@ -419,7 +435,7 @@ function init (callback) {
         if (err) {
           callback(err);
         } else {
-          console.log('Init worked, calling back.');
+          winston.info('Init worked, calling back.');
           callback();
         }
       });
