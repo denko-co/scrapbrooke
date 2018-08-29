@@ -219,13 +219,15 @@ async function createAndSendExport (results, scrapChannel, channelToSend) {
   for (let i = 0; i < results.length; i++) {
     let result = results[i];
     let msg;
+    let link = '';
     try {
       let retrievedMsg = await scrapChannel.fetchMessage(result.botMessageId);
       msg = retrievedMsg.embeds[0];
+      link = ' ' + getMessageLink(scrapChannel.guild, scrapChannel, retrievedMsg);
     } catch (e) {
       msg = {description: '<my snap deleted> 😭'};
     }
-    let messageToAppend = '#' + (i + 1) + ' - ' + (msg.description || '*no text*');
+    let messageToAppend = '#' + (i + 1) + ' - ' + (msg.description || '*no text*') + link;
     if (msg.image) messageToAppend += ' - ' + msg.image.url;
     messageToAppend += '\n';
     if (messageToAppend.length + currentText.length + exportText.length > 2000 && !msgText) {
@@ -272,7 +274,8 @@ function sendEmbedList (results, channel, scrapChannel, count) {
   if (results.length === 0) return;
   let result = results.shift();
   scrapChannel.fetchMessage(result.botMessageId).then(retrivedMsg => {
-    channel.send(`#${count} - ${result.likes} like${result.likes === 1 ? '' : 's'}`, {embed: retrivedMsg.embeds[0]}).then(msg => {
+    channel.send(`#${count} - ${result.likes} like${result.likes === 1 ? '' : 's'} ${getMessageLink(scrapChannel.guild, scrapChannel, retrivedMsg)}`,
+      {embed: retrivedMsg.embeds[0]}).then(msg => {
       sendEmbedList(results, channel, scrapChannel, count + 1);
     });
   }).catch(err => {
@@ -363,7 +366,7 @@ function createEmbed (message) {
   // Converted and modified version of https://github.com/Rapptz/RoboDanny/blob/rewrite/cogs/stars.py#L168
   let embed = new Discord.RichEmbed();
   embed.setDescription(message.content);
-  let content = `📸 ${message.channel}`;
+  let content = `📸 ${message.channel} ${getMessageLink(message.guild, message.channel, message)}`;
 
   if (message.embeds.length > 0) {
     let data = message.embeds[0];
@@ -411,6 +414,11 @@ function groupByArray (xs, key) {
     if (el) { el.values.push(x); } else { rv.push({ key: v, values: [x] }); }
     return rv;
   }, []);
+}
+
+function getMessageLink (guild, channel, message) {
+  let guildId = guild ? guild.id : '@me';
+  return `https://discordapp.com/channels/${guildId}/${channel.id}/${message.id}`;
 }
 
 function isKnownUser (userId) {
