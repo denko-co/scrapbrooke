@@ -53,7 +53,7 @@ bot.on('ready', function (event) {
   // As long as the bot is online, the likes will be correct
   // However, when it goes offline, we may have missed something
   // Run this resync every once and a while just to make sure we're looking good ;)
-  /*
+
   allPosts.forEach(post => {
     const guild = bot.guilds.get(post.guildId);
     const ch = guild.channels.find(channel => channel.name === 'scrapbook');
@@ -68,9 +68,25 @@ bot.on('ready', function (event) {
       let netLikes = (likes ? likes.count : 0) - (dislikes ? dislikes.count : 0);
       messageInfo.likes = netLikes;
       db.saveDatabase();
-    }).catch(err => winston.error(err));
+    }).catch(err => {});
   });
-  */
+
+  // Similar working for user snapped
+
+  allPosts.forEach(post => {
+    const msgChannel = bot.channels.get(post.channelId);
+    msgChannel.fetchMessage(post.originalMessageId).then(msg => {
+      // Get proper user reaction count
+      let reacts = msg.reactions;
+      let snaps = reacts.get('📸');
+      if (!snaps) return; // If nothing do nothing, need something
+      snaps.fetchUsers().then(userCollect => {
+        let messageInfo = db.getCollection('scraps').findOne({'originalMessageId': post.originalMessageId});
+        messageInfo.snappedBy = Array.from(userCollect.keys());
+        db.saveDatabase();
+      });
+    }).catch(err => {});
+  });
 });
 
 bot.on('message', function (message) {
@@ -319,17 +335,22 @@ bot.on('raw', async event => {
   const { d: data } = event;
   const user = bot.users.get(data.user_id);
   const channel = bot.channels.get(data.channel_id) || await user.createDM();
+  let message = channel.messages.get(data.message_id);
 
-  const message = await channel.fetchMessage(data.message_id);
   const emojiKey = (data.emoji.id) ? `${data.emoji.name}:${data.emoji.id}` : data.emoji.name;
+
+  if (event.t === 'MESSAGE_REACTION_REMOVE' && message && message.reactions.get(emojiKey) && message.reactions.get(emojiKey).users.size) return;
+  if (event.t === 'MESSAGE_REACTION_ADD' && message) return;
+
+  if (!message) {
+    message = await channel.fetchMessage(data.message_id);
+  }
   let reaction = message.reactions.get(emojiKey);
 
   if (!reaction) {
     const emoji = new Discord.Emoji(bot.guilds.get(data.guild_id), data.emoji);
     reaction = new Discord.MessageReaction(message, emoji, 1, data.user_id === bot.user.id);
   }
-
-  if (reaction.users.has(user.id)) return;
 
   bot.emit(events[event.t], reaction, user);
 });
@@ -356,28 +377,51 @@ function handleReaction (messageReaction, user, removed) {
   switch (messageReaction.emoji.name) {
     case '📸':
       messageInfo = db.getCollection('scraps').findOne({'originalMessageId': messageReaction.message.id});
-      if (messageReaction.count >= reactThreshold && !messageInfo) {
-        let users = Array.from(messageReaction.users.keys());
-        if (users.length === 0) users = [user.id];
-        // New snap taken, post it!
-        let msg = createEmbed(messageReaction.message);
-        // Need to insert before posting to stop duplicates due to weaving
-        let insertedRecord = scraps.insert({
-          botMessageId: null,
-          originalMessageId: messageReaction.message.id,
-          authorId: messageReaction.message.author.id,
-          channelId: messageReaction.message.channel.id,
-          guildId: messageReaction.message.guild.id,
-          snappedBy: users,
-          quoteOn: messageReaction.message.createdTimestamp,
-          likes: 0
-        });
-        db.saveDatabase();
-        scrapbookChannel.send(msg.content, {embed: msg.embed}).then(botMessage => {
-          insertedRecord.botMessageId = botMessage.id;
+      if (!messageInfo) {
+        if (messageReaction.count >= reactThreshold) {
+          // Probably needs a fetch
+          let users = Array.from(messageReaction.users.keys());
+          if (users.length === 0) users = [user.id];
+          // New snap taken, post it!
+          let msg = createEmbed(messageReaction.message);
+          // Need to insert before posting to stop duplicates due to weaving
+          let insertedRecord = scraps.insert({
+            botMessageId: null,
+            originalMessageId: messageReaction.message.id,
+            authorId: messageReaction.message.author.id,
+            channelId: messageReaction.message.channel.id,
+            guildId: messageReaction.message.guild.id,
+            snappedBy: users,
+            quoteOn: messageReaction.message.createdTimestamp,
+            likes: 0
+          });
           db.saveDatabase();
-          botMessage.react('👍').then(msg => botMessage.react('👎'));
-        });
+          scrapbookChannel.send(msg.content, {embed: msg.embed}).then(botMessage => {
+            insertedRecord.botMessageId = botMessage.id;
+            db.saveDatabase();
+            botMessage.react('👍').then(msg => botMessage.react('👎'));
+          });
+        }
+      } else {
+        // Exists, update snappers
+        const index = messageInfo.snappedBy.indexOf(user.id);
+        if (removed) {
+          // If old array length is one and the person removing it is the same as in there, do nothing
+          // Otherwise remove as expected
+          if (!(messageInfo.snappedBy.length === 1 && user.id === messageInfo.snappedBy[0])) {
+            if (index !== -1) messageInfo.snappedBy.splice(index, 1);
+          }
+        } else {
+          if (messageInfo.snappedBy.length === 1 && messageReaction.count === 1) {
+            if (user.id !== messageInfo.snappedBy[0]) {
+              // Someone else has taken the hit, replace them
+              messageInfo.snappedBy = [user.id];
+            } // Otherwise they have added themselves back, do nothing
+          } else {
+            if (index === -1) messageInfo.snappedBy.push(user.id);
+          }
+        }
+        db.saveDatabase();
       }
       break;
     case '👍':
