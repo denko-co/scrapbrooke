@@ -49,7 +49,7 @@ bot.on('ready', function (event) {
       fetched = true;
     })
     .catch(err => winston.error(err));
-
+  /*
   // As long as the bot is online, the likes will be correct
   // However, when it goes offline, we may have missed something
   // Run this resync every once and a while just to make sure we're looking good ;)
@@ -68,7 +68,7 @@ bot.on('ready', function (event) {
       let netLikes = (likes ? likes.count : 0) - (dislikes ? dislikes.count : 0);
       messageInfo.likes = netLikes;
       db.saveDatabase();
-    }).catch(err => {});
+    }).catch(err => winston.error(err));
   });
 
   // Similar working for user snapped
@@ -85,8 +85,9 @@ bot.on('ready', function (event) {
         messageInfo.snappedBy = Array.from(userCollect.keys());
         db.saveDatabase();
       });
-    }).catch(err => {});
+    }).catch(err => winston.error(err));
   });
+  */
 });
 
 bot.on('message', function (message) {
@@ -155,12 +156,16 @@ bot.on('message', function (message) {
               let state = 'EXPORT';
               let before = null;
               let after = null;
+              let likes = null;
               let withUsers = [];
               let withoutUsers = [];
+              let snapper = false;
               for (let i = 3; i < command.length; i++) {
                 let com = command[i].toUpperCase();
-                if (['WITH', 'WITHOUT', 'BEFORE', 'AFTER'].includes(com)) {
+                if (['WITH', 'WITHOUT', 'BEFORE', 'AFTER', 'LIKES'].includes(com)) {
                   state = com;
+                } else if (com === 'SNAPPER') {
+                  snapper = true;
                 } else {
                   let mentionedUserId = getUserFromMention(command[i]);
                   let mentionedUser = bot.users.get(mentionedUserId) || isKnownUser(mentionedUserId);
@@ -200,6 +205,15 @@ bot.on('message', function (message) {
                         }
                       }
                       break;
+                    case 'LIKES':
+                      let num = parseInt(command[i]);
+                      if (likes || isNaN(num)) {
+                        message.channel.send(`Sorry, I don't understand, what do you want the minimum number of likes to be? owo`);
+                        return;
+                      } else {
+                        likes = num;
+                      }
+                      break;
                     default:
                       throw new Error(`Unrecognised state ${state}`);
                   }
@@ -207,18 +221,20 @@ bot.on('message', function (message) {
               }
 
               // We've made it this far with no errors, generate the export
-              let dataset = scraps.chain().find({'authorId': {'$eq': userId}});
+              let dataset = scraps.chain();
+              dataset = snapper ? dataset.find({'snappedBy': {'$contains': userId}}) : dataset.find({'authorId': {'$eq': userId}});
               if (withUsers.length > 0) dataset = dataset.find({'snappedBy': {'$containsAny': withUsers}});
               if (withoutUsers.length > 0) dataset = dataset.find({'snappedBy': {'$containsNone': withoutUsers}});
               if (before) dataset = dataset.find({'quoteOn': {'$lte': before}});
               if (after) dataset = dataset.find({'quoteOn': {'$gte': after}});
+              if (likes) dataset = dataset.find({'likes': {'$gte': likes}});
               let results = dataset.simplesort('quoteOn', true).data();
               // Now that we have the result set, build our response
               if (results.length === 0) {
                 message.channel.send('No matching quotes found! Time to get snapping! 📸');
               } else {
                 message.channel.send('Exporting results! (this might take a while ...)').then(msg => {
-                  createAndSendExport(results, scrapbookChannel, message.channel);
+                  createAndSendExport(results, scrapbookChannel, message.channel, snapper, likes);
                 });
               }
             } else {
@@ -245,6 +261,8 @@ bot.on('message', function (message) {
           msg += '*- without <mention> <mention> ...* ignores quotes where the mentioned users took the snap (*and you give yourself away*)\n';
           msg += '*- before <YYYY-MM-DD>* only exports quotes said before the provided date\n';
           msg += '*- after <YYYY-MM-DD>* only exports quotes said after the provided date\n';
+          msg += '*- snapper* will change the query to not take the specified users quotes, but quotes snapped by that user\n';
+          msg += '*- likes <number>* limits results to only those recieving at least <number> likes\n';
           msg += 'Oh, and **help** shows you this, aheh uwu';
           message.channel.send(msg);
       }
@@ -254,7 +272,7 @@ bot.on('message', function (message) {
   }
 });
 
-async function createAndSendExport (results, scrapChannel, channelToSend) {
+async function createAndSendExport (results, scrapChannel, channelToSend, snapper, likes) {
   let exportText = '... plus more in the export!';
   let msgText = null;
   let currentText = '';
@@ -262,14 +280,17 @@ async function createAndSendExport (results, scrapChannel, channelToSend) {
     let result = results[i];
     let msg;
     let link = '';
+    let author = '';
     try {
       let retrievedMsg = await scrapChannel.fetchMessage(result.botMessageId);
       msg = retrievedMsg.embeds[0];
       link = getMessageLink(scrapChannel.guild, scrapChannel, retrievedMsg);
+      if (snapper) author = `- ${msg.author.name} `; // Not sure if name can be missing on an author but we know this is our embed
     } catch (e) {
       msg = {description: '<my snap deleted> 😭'};
     }
-    let messageToAppend = `#${i + 1} - ${msg.description || '*no text*'} ${link}`;
+    let likeText = likes || likes === 0 ? `(${result.likes} like${result.likes === 1 ? '' : 's'}) ` : '';
+    let messageToAppend = `#${i + 1} ${author}- ${msg.description || '*no text*'} ${likeText}${link}`;
     if (msg.image) messageToAppend += ` - ${msg.image.url}`;
     messageToAppend += '\n';
     if (messageToAppend.length + currentText.length + exportText.length > 2000 && !msgText) {
