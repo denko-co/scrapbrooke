@@ -98,7 +98,6 @@ bot.on('ready', function (event) {
       });
     }).catch(err => winston.error(err));
   });
-  */
 
   // Some migration to keep for reference but to comment out
   allPosts.forEach(post => {
@@ -110,6 +109,7 @@ bot.on('ready', function (event) {
       db.saveDatabase();
     }
   });
+  */
 });
 
 bot.on('message', function (message) {
