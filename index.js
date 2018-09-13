@@ -2,8 +2,9 @@ const Discord = require('discord.js');
 const Loki = require('lokijs');
 const winston = require('winston');
 const bot = new Discord.Client({autoReconnect: true});
-const reactThreshold = 1;
-const funPolice = false;
+const DEFAULT_REACT_THRESHOLD = 1;
+const DEFAULT_FUN_POLICE = false;
+const DEFAULT_ALLOW_SELFIES = false;
 // const timeTillLate = 86400; // One day
 const events = {
   MESSAGE_REACTION_ADD: 'messageReactionAdd',
@@ -38,6 +39,7 @@ bot.login(process.env.TOKEN);
 bot.on('ready', function (event) {
   winston.info(`Logged in as ${bot.user.username} - ${bot.user.id}`);
   // Before we start, fetch all the users in our db to avoid explosions
+  // Include those which are IN_PROGRESS OR null
   let allPosts = db.getCollection('scraps').chain().data();
   let userFetches = allPosts.map(post => bot.fetchUser(post.authorId).catch(err => err));
   Promise.all(userFetches)
@@ -49,6 +51,15 @@ bot.on('ready', function (event) {
       fetched = true;
     })
     .catch(err => winston.error(err));
+  // If a post is IN_PROGRESS and never got unset, reset it to null
+  const inProgressPosts = allPosts.filter(post => post.botMessageId === 'IN_PROGRESS');
+  inProgressPosts.forEach(post => {
+    // A bit misleading but it will do the job
+    let messageInfo = db.getCollection('scraps').findOne({'botMessageId': post.botMessageId});
+    messageInfo.botMessageId = null;
+    db.saveDatabase();
+  });
+
   /*
   // As long as the bot is online, the likes will be correct
   // However, when it goes offline, we may have missed something
@@ -88,6 +99,17 @@ bot.on('ready', function (event) {
     }).catch(err => winston.error(err));
   });
   */
+
+  // Some migration to keep for reference but to comment out
+  allPosts.forEach(post => {
+    const guild = bot.guilds.get(post.guildId);
+    const ch = guild.channels.find(channel => channel.name === 'scrapbook');
+    if (!post.botChannelId) {
+      let messageInfo = db.getCollection('scraps').findOne({'originalMessageId': post.originalMessageId});
+      messageInfo.botChannelId = ch.id;
+      db.saveDatabase();
+    }
+  });
 });
 
 bot.on('message', function (message) {
@@ -96,20 +118,19 @@ bot.on('message', function (message) {
     if (!fetched) return; // Don't run any commands if we haven't done a full fetch
     let guild = message.guild;
     if (!guild) return;
-    let scrapbookChannel = guild.channels.find(channel => channel.name === 'scrapbook');
-    if (!scrapbookChannel) return;
+    let thisGuildInfo = getGuildInfo(guild);
     let command = message.content.match(/\S+/g) || [];
     if (command[0] !== bot.user.toString()) return;
     if (command[1]) {
       let scraps = db.getCollection('scraps');
       let lCommand = command[1].toLowerCase();
-      if (['top', 'snaps', 'likes'].includes(lCommand) && funPolice) {
+      if (['top', 'snaps', 'likes'].includes(lCommand) && thisGuildInfo.funPolice) {
         message.channel.send(';~;');
         return;
       }
       switch (lCommand) {
         case 'top':
-          let results = scraps.chain();
+          let results = scraps.chain().find({'botMessageId': {'$nin': [null, 'IN_PROGRESS']}});
           if (command[2]) {
             let userId = getUserFromMention(command[2]);
             let user = bot.users.get(userId) || isKnownUser(userId);
@@ -124,18 +145,18 @@ bot.on('message', function (message) {
           results = results.sort((a, b) => a.likes === b.likes ? b.quoteOn - a.quoteOn : b.likes - a.likes).limit(3).data();
           let forText = command[2] ? `for ${command[2]}` : 'of all time';
           message.channel.send(`Here are the top 3 most popular snaps ${forText}. *ahem*`).then(msg => {
-            sendEmbedList(results, message.channel, scrapbookChannel, 1);
+            sendEmbedList(results, message.channel, 1);
           });
           break;
         case 'snaps':
-          let snappedUsers = groupByArray(scraps.chain().data(), 'authorId');
+          let snappedUsers = groupByArray(scraps.chain().find({'botMessageId': {'$nin': [null, 'IN_PROGRESS']}}).data(), 'authorId');
           let snappedScores = snappedUsers.map(user => {
             return {user: getDisplayName(user.key, guild), score: user.values.length};
           });
           message.channel.send('', {embed: createScoreboard(snappedScores, 'Users most snapped', '📸')});
           break;
         case 'likes':
-          let scoredUsers = groupByArray(scraps.chain().data(), 'authorId');
+          let scoredUsers = groupByArray(scraps.chain().find({'botMessageId': {'$nin': [null, 'IN_PROGRESS']}}).data(), 'authorId');
           let scoredScores = scoredUsers.map(user => { // I really do crack myself up sometimes
             return {
               user: getDisplayName(user.key, guild),
@@ -221,7 +242,7 @@ bot.on('message', function (message) {
               }
 
               // We've made it this far with no errors, generate the export
-              let dataset = scraps.chain();
+              let dataset = scraps.chain().find({'botMessageId': {'$nin': [null, 'IN_PROGRESS']}});
               dataset = snapper ? dataset.find({'snappedBy': {'$contains': userId}}) : dataset.find({'authorId': {'$eq': userId}});
               if (withUsers.length > 0) dataset = dataset.find({'snappedBy': {'$containsAny': withUsers}});
               if (withoutUsers.length > 0) dataset = dataset.find({'snappedBy': {'$containsNone': withoutUsers}});
@@ -234,7 +255,7 @@ bot.on('message', function (message) {
                 message.channel.send('No matching quotes found! Time to get snapping! 📸');
               } else {
                 message.channel.send('Exporting results! (this might take a while ...)').then(msg => {
-                  createAndSendExport(results, scrapbookChannel, message.channel, snapper, likes);
+                  createAndSendExport(results, message.channel, snapper, likes);
                 });
               }
             } else {
@@ -245,11 +266,41 @@ bot.on('message', function (message) {
             message.channel.send('Who do you want me to export? :3');
           }
           break;
+        case 'set':
+          if (command[2]) {
+            let channelId = getChannelFromMention(command[2]);
+            let channel = guild.channels.get(channelId);
+            if (channel) {
+              let guilds = db.getCollection('guilds');
+              let guildInfo = guilds.findOne({guildId: guild.id});
+              if (guildInfo) {
+                // Update old guild info
+                guildInfo.channelId = channel.id;
+              } else {
+                // Add new info for this guild
+                guilds.insert({
+                  guildId: guild.id,
+                  channelId: channel.id,
+                  selfiesAllowed: DEFAULT_ALLOW_SELFIES,
+                  reactThreshold: DEFAULT_REACT_THRESHOLD,
+                  funPolice: DEFAULT_FUN_POLICE
+                });
+              }
+              message.channel.send('Channel info saved! <o');
+              db.saveDatabase();
+            } else {
+              message.channel.send(`Sorry, I don't see a channel here called ${command[2]}. ` +
+                `Make sure you are using a proper channel mention!`);
+            }
+          } else {
+            message.channel.send('What channel do you want me to post in? owo');
+          }
+          break;
         case 'help':
           let msg = '';
-          msg += `${reactThreshold} 📸 react${reactThreshold === 1 ? '' : 's'} and I'll save the post. React with 👍 to show some love!\n`;
-          if (funPolice) {
-            msg += 'Since the Fun Police came and confiscated all my score boards, I only have one non-help command left. I hope you like it. ;~;\n';
+          msg += `${thisGuildInfo.reactThreshold} 📸 react${thisGuildInfo.reactThreshold === 1 ? '' : 's'} and I'll save the post. React with 👍 to show some love!\n`;
+          if (thisGuildInfo.funPolice) {
+            msg += 'Since the Fun Police came and confiscated all my score boards, I only have one non-admin command left. I hope you like it. ;~;\n';
           } else {
             msg += 'Here\'s what I know: *ahem*\n';
             msg += '**- top (<mention>)** shows the top 3 posts of all time, or for a user if mentioned\n';
@@ -263,6 +314,8 @@ bot.on('message', function (message) {
           msg += '*- after <YYYY-MM-DD>* only exports quotes said after the provided date\n';
           msg += '*- snapper* will change the query to not take the specified users quotes, but quotes snapped by that user\n';
           msg += '*- likes <number>* limits results to only those recieving at least <number> likes\n';
+          msg += '\nI also know the following admin commands: *ahem*\n';
+          msg += '**- set <channel mention>** will mean future snaps will go to the mentioned channel. By default, they go to #scrapbook\n';
           msg += 'Oh, and **help** shows you this, aheh uwu';
           message.channel.send(msg);
       }
@@ -272,7 +325,7 @@ bot.on('message', function (message) {
   }
 });
 
-async function createAndSendExport (results, scrapChannel, channelToSend, snapper, likes) {
+async function createAndSendExport (results, channelToSend, snapper, likes) {
   let exportText = '... plus more in the export!';
   let msgText = null;
   let currentText = '';
@@ -281,12 +334,13 @@ async function createAndSendExport (results, scrapChannel, channelToSend, snappe
     let msg;
     let link = '';
     let author = '';
+    let scrapChannel = channelToSend.guild.channels.get(result.botChannelId);
     try {
       let retrievedMsg = await scrapChannel.fetchMessage(result.botMessageId);
       msg = retrievedMsg.embeds[0];
       link = getMessageLink(scrapChannel.guild, scrapChannel, retrievedMsg);
       if (snapper) author = `- ${msg.author.name} `; // Not sure if name can be missing on an author but we know this is our embed
-    } catch (e) {
+    } catch (err) {
       msg = {description: '<my snap deleted> 😭'};
     }
     let likeText = likes || likes === 0 ? `(${result.likes} like${result.likes === 1 ? '' : 's'}) ` : '';
@@ -323,6 +377,10 @@ function getUserFromMention (mention) {
   return mention.replace(/[<@!>]/g, '');
 }
 
+function getChannelFromMention (mention) {
+  return mention.replace(/[<#>]/g, '');
+}
+
 function createScoreboard (scores, title, icon) {
   let sorted = scores.sort((a, b) => b.score - a.score);
   let desc = '';
@@ -333,20 +391,23 @@ function createScoreboard (scores, title, icon) {
 }
 
 // RECURSIVE >:(
-function sendEmbedList (results, channel, scrapChannel, count) {
+function sendEmbedList (results, channel, count) {
   if (results.length === 0) return;
   let result = results.shift();
-  scrapChannel.fetchMessage(result.botMessageId).then(retrivedMsg => {
-    channel.send(`#${count} - ${result.likes} like${result.likes === 1 ? '' : 's'} ${getMessageLink(scrapChannel.guild, scrapChannel, retrivedMsg)}`,
-      {embed: retrivedMsg.embeds[0]}).then(msg => {
-      sendEmbedList(results, channel, scrapChannel, count + 1);
+  let scrapChannel = channel.guild.channels.get(result.botChannelId);
+  try {
+    scrapChannel.fetchMessage(result.botMessageId).then(retrivedMsg => {
+      channel.send(`#${count} - ${result.likes} like${result.likes === 1 ? '' : 's'} ${getMessageLink(scrapChannel.guild, scrapChannel, retrivedMsg)}`,
+        {embed: retrivedMsg.embeds[0]}).then(msg => {
+        sendEmbedList(results, channel, count + 1);
+      });
     });
-  }).catch(err => {
+  } catch (err) {
     winston.error(err);
     channel.send(`#${count} - ${result.likes} like${result.likes === 1 ? '' : 's'} - <my snap deleted> 😭`).then(msg => {
-      sendEmbedList(results, channel, scrapChannel, count + 1);
+      sendEmbedList(results, channel, count + 1);
     });
-  });
+  };
 }
 
 // https://github.com/discordjs/guide/blob/master/code-samples/popular-topics/reactions/raw-event.js
@@ -390,8 +451,8 @@ function handleReaction (messageReaction, user, removed) {
   if (!['📸', '👍', '👎'].includes(messageReaction.emoji.name)) return;
   let guild = messageReaction.message.guild;
   if (!guild) return;
-  let scrapbookChannel = guild.channels.find(channel => channel.name === 'scrapbook');
-  if (!scrapbookChannel) return;
+  let thisGuildInfo = getGuildInfo(guild);
+  if (!thisGuildInfo.scrapbookChannel) return;
   // Snap taken, get this message's info
   let scraps = db.getCollection('scraps');
   let messageInfo;
@@ -399,50 +460,39 @@ function handleReaction (messageReaction, user, removed) {
     case '📸':
       messageInfo = db.getCollection('scraps').findOne({'originalMessageId': messageReaction.message.id});
       if (!messageInfo) {
-        if (messageReaction.count >= reactThreshold) {
-          // Probably needs a fetch
-          let users = Array.from(messageReaction.users.keys());
-          if (users.length === 0) users = [user.id];
-          // New snap taken, post it!
-          let msg = createEmbed(messageReaction.message);
-          // Need to insert before posting to stop duplicates due to weaving
-          let insertedRecord = scraps.insert({
-            botMessageId: null,
-            originalMessageId: messageReaction.message.id,
-            authorId: messageReaction.message.author.id,
-            channelId: messageReaction.message.channel.id,
-            guildId: messageReaction.message.guild.id,
-            snappedBy: users,
-            quoteOn: messageReaction.message.createdTimestamp,
-            likes: 0
-          });
-          db.saveDatabase();
-          scrapbookChannel.send(msg.content, {embed: msg.embed}).then(botMessage => {
-            insertedRecord.botMessageId = botMessage.id;
-            db.saveDatabase();
-            botMessage.react('👍').then(msg => botMessage.react('👎'));
-          });
-        }
-      } else {
-        // Exists, update snappers
-        const index = messageInfo.snappedBy.indexOf(user.id);
-        if (removed) {
-          // If old array length is one and the person removing it is the same as in there, do nothing
-          // Otherwise remove as expected
-          if (!(messageInfo.snappedBy.length === 1 && user.id === messageInfo.snappedBy[0])) {
-            if (index !== -1) messageInfo.snappedBy.splice(index, 1);
-          }
-        } else {
-          if (messageInfo.snappedBy.length === 1 && messageReaction.count === 1) {
-            if (user.id !== messageInfo.snappedBy[0]) {
-              // Someone else has taken the hit, replace them
-              messageInfo.snappedBy = [user.id];
-            } // Otherwise they have added themselves back, do nothing
-          } else {
-            if (index === -1) messageInfo.snappedBy.push(user.id);
-          }
-        }
+        // Insert a blank for use later
+        messageInfo = scraps.insert({
+          botMessageId: null,
+          botChannelId: thisGuildInfo.scrapbookChannel.id,
+          originalMessageId: messageReaction.message.id,
+          authorId: messageReaction.message.author.id,
+          channelId: messageReaction.message.channel.id,
+          guildId: messageReaction.message.guild.id,
+          snappedBy: [],
+          quoteOn: messageReaction.message.createdTimestamp,
+          likes: 0
+        });
+      }
+      // Update message info. No need to leave someone holding the bag, as the embed will record whodunit
+      // Let self snappers remove themselves if they came in before the update, but not add themselves after
+      const index = messageInfo.snappedBy.indexOf(user.id);
+      if (removed) {
+        if (index !== -1) messageInfo.snappedBy.splice(index, 1);
+      } else if (index === -1 && (thisGuildInfo.selfiesAllowed || messageReaction.message.author.id !== user.id)) {
+        messageInfo.snappedBy.push(user.id);
+      }
+      db.saveDatabase();
+
+      if (messageInfo.botMessageId === null & messageInfo.snappedBy.length >= thisGuildInfo.reactThreshold) {
+        // New snap taken, post it!
+        let msg = createEmbed(messageReaction.message, messageInfo.snappedBy);
+        messageInfo.botMessageId = 'IN_PROGRESS';
         db.saveDatabase();
+        thisGuildInfo.scrapbookChannel.send(msg.content, {embed: msg.embed}).then(botMessage => {
+          messageInfo.botMessageId = botMessage.id;
+          db.saveDatabase();
+          botMessage.react('👍').then(msg => botMessage.react('👎'));
+        });
       }
       break;
     case '👍':
@@ -457,12 +507,42 @@ function handleReaction (messageReaction, user, removed) {
   }
 }
 
-function createEmbed (message) {
+function getGuildInfo (guild) {
+  let guilds = db.getCollection('guilds');
+  let thisGuildInfo = guilds.findOne({guildId: guild.id});
+  return thisGuildInfo
+    ? {
+      reactThreshold: thisGuildInfo.reactThreshold,
+      selfiesAllowed: thisGuildInfo.selfiesAllowed,
+      funPolice: thisGuildInfo.funPolice,
+      scrapbookChannel: guild.channels.get(thisGuildInfo.channelId)
+    } : {
+      reactThreshold: DEFAULT_REACT_THRESHOLD,
+      selfiesAllowed: DEFAULT_ALLOW_SELFIES,
+      funPolice: DEFAULT_FUN_POLICE,
+      scrapbookChannel: guild.channels.find(channel => channel.name === 'scrapbook')
+    };
+}
+
+function getMention (userId) {
+  return '<@' + userId + '>';
+};
+
+function formattedList (array) {
+  return [array.slice(0, -1).join(', '), array.slice(-1)[0]].join(array.length < 2 ? '' : ' and ');
+};
+
+function mentionList (userIdArray) {
+  const mentionArray = userIdArray.map(userId => getMention(userId));
+  return formattedList(mentionArray);
+}
+
+function createEmbed (message, snappers) {
   // Converted and modified version of https://github.com/Rapptz/RoboDanny/blob/rewrite/cogs/stars.py#L168
   // Includes my own mod to repost an embed if snapped
   let origEmbed = message.embeds[0];
   let embed = new Discord.RichEmbed(origEmbed);
-  let content = `📸 ${message.channel} ${getMessageLink(message.guild, message.channel, message)}`;
+  let content = `📸 snapped by ${mentionList(snappers)} in ${message.channel} ${getMessageLink(message.guild, message.channel, message)}`;
 
   if (!origEmbed) {
     embed.setDescription(message.content);
@@ -523,7 +603,9 @@ function getMessageLink (guild, channel, message) {
 
 function isKnownUser (userId) {
   // dumpster dive
-  return db.getCollection('scraps').chain().where(obj => obj.authorId === userId || obj.snappedBy.includes(userId)).data().length > 0;
+  return db.getCollection('scraps').chain()
+    .find({'botMessageId': {'$nin': [null, 'IN_PROGRESS']}})
+    .where(obj => obj.authorId === userId || obj.snappedBy.includes(userId)).data().length > 0;
 }
 
 function init (callback) {
@@ -536,8 +618,12 @@ function init (callback) {
       callback(err);
     } else {
       let scraps = db.getCollection('scraps');
+      let guilds = db.getCollection('guilds');
       if (!scraps) {
         db.addCollection('scraps');
+      }
+      if (!guilds) {
+        db.addCollection('guilds');
       }
       db.saveDatabase(function (err) {
         if (err) {
