@@ -1,6 +1,7 @@
 const Discord = require('discord.js');
 const Loki = require('lokijs');
 const winston = require('winston');
+const request = require('request');
 const bot = new Discord.Client({autoReconnect: true});
 const DEFAULT_REACT_THRESHOLD = 1;
 const DEFAULT_FUN_POLICE = false;
@@ -557,7 +558,7 @@ function createEmbed (message, snappers) {
   let file = message.attachments.first();
   if (file) {
     if (endsWithAny(file.url.toLowerCase(), ['png', 'jpeg', 'jpg', 'gif', 'webp']) && !origEmbed) {
-      embed.setImage(file.url);
+      embed.attachFiles([new Discord.Attachment(request(file.url), file.filename)]).setImage(`attachment://${file.filename}`);
     } else {
       // Either we can't read it or we are adding to an old embed
       embed.addField('Attachment', `[${file.filename}](${file.url})`);
