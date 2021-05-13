@@ -121,7 +121,7 @@ bot.on('message', function (message) {
     if (!guild) return;
     let thisGuildInfo = getGuildInfo(guild);
     let command = message.content.match(/\S+/g) || [];
-    if (command[0] !== bot.user.toString()) return;
+    if (getUserIdFromMention(command[0]) === bot.id) return;
     if (command[1]) {
       let scraps = db.getCollection('scraps');
       let lCommand = command[1].toLowerCase();
@@ -538,7 +538,16 @@ function getMention (userId) {
   return '<@' + userId + '>';
 };
 
-function formattedList (array) {
+function getUserIdFromMention(mention) {
+  const matches = mention.match(/^<@!?(\d+)>$/);
+  if (!matches) {
+    return null;
+  } else {
+    return matches[1];
+  }
+}
+
+function formattedList(array) {
   return [array.slice(0, -1).join(', '), array.slice(-1)[0]].join(array.length < 2 ? '' : ' and ');
 };
 
