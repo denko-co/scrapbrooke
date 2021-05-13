@@ -130,6 +130,15 @@ bot.on('message', function (message) {
         return;
       }
       switch (lCommand) {
+        case 'random':
+          let results = scraps.find({ 'botMessageId': { '$nin': [null, 'IN_PROGRESS'] } });
+          let count = results.length;
+          let id = Math.floor(Math.random() * count);
+          let scrap = results[id];
+          message.channel.send(`Here is a random snap XD`).then(msg => {
+            sendEmbedList([scrap], message.channel, 1);
+          });
+          break;
         case 'top':
           let results = scraps.chain().find({'botMessageId': {'$nin': [null, 'IN_PROGRESS']}});
           if (command[2]) {
