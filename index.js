@@ -12,7 +12,6 @@ const events = {
   MESSAGE_REACTION_REMOVE: 'messageReactionRemove'
 };
 let initalised = false;
-let fetched = false;
 let db;
 
 winston.configure({
@@ -39,19 +38,6 @@ bot.login(process.env.TOKEN);
 
 bot.on('ready', function (event) {
   winston.info(`Logged in as ${bot.user.username} - ${bot.user.id}`);
-  // Before we start, fetch all the users in our db to avoid explosions
-  // Include those which are IN_PROGRESS OR null
-  let allPosts = db.getCollection('scraps').chain().data();
-  let userFetches = allPosts.map(post => bot.fetchUser(post.authorId).catch(err => err));
-  Promise.all(userFetches)
-    .then(results => {
-      results.forEach(result => {
-        if (result instanceof Error) winston.error(`Fetch error encountered: ${result}`);
-      });
-      winston.info('Fetch completed!');
-      fetched = true;
-    })
-    .catch(err => winston.error(err));
   // If a post is IN_PROGRESS and never got unset, reset it to null
   const inProgressPosts = allPosts.filter(post => post.botMessageId === 'IN_PROGRESS');
   inProgressPosts.forEach(post => {
@@ -116,12 +102,11 @@ bot.on('ready', function (event) {
 bot.on('message', function (message) {
   // Handle commands
   if (!message.author.bot) {
-    if (!fetched) return; // Don't run any commands if we haven't done a full fetch
     let guild = message.guild;
     if (!guild) return;
     let thisGuildInfo = getGuildInfo(guild);
     let command = message.content.match(/\S+/g) || [];
-    if (command[0] !== bot.user.toString()) return;
+    if (getUserIdFromMention(command[0]) === bot.id) return;
     if (command[1]) {
       let scraps = db.getCollection('scraps');
       let lCommand = command[1].toLowerCase();
@@ -131,12 +116,12 @@ bot.on('message', function (message) {
       }
       switch (lCommand) {
         case 'random':
-          let results = scraps.find({ 'botMessageId': { '$nin': [null, 'IN_PROGRESS'] } });
-          let count = results.length;
+          let allScraps = scraps.find({ 'botMessageId': { '$nin': [null, 'IN_PROGRESS'] } });
+          let count = allScraps.length;
           let id = Math.floor(Math.random() * count);
-          let scrap = results[id];
+          let randomScrap = allScraps[id];
           message.channel.send(`Here is a random snap XD`).then(msg => {
-            sendEmbedList([scrap], message.channel, 1);
+            sendEmbedList([randomScrap], message.channel, 1);
           });
           break;
         case 'top':
@@ -538,7 +523,16 @@ function getMention (userId) {
   return '<@' + userId + '>';
 };
 
-function formattedList (array) {
+function getUserIdFromMention(mention) {
+  const matches = mention.match(/^<@!?(\d+)>$/);
+  if (!matches) {
+    return null;
+  } else {
+    return matches[1];
+  }
+}
+
+function formattedList(array) {
   return [array.slice(0, -1).join(', '), array.slice(-1)[0]].join(array.length < 2 ? '' : ' and ');
 };
 
