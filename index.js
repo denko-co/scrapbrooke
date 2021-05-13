@@ -12,7 +12,6 @@ const events = {
   MESSAGE_REACTION_REMOVE: 'messageReactionRemove'
 };
 let initalised = false;
-let fetched = false;
 let db;
 
 winston.configure({
@@ -39,19 +38,6 @@ bot.login(process.env.TOKEN);
 
 bot.on('ready', function (event) {
   winston.info(`Logged in as ${bot.user.username} - ${bot.user.id}`);
-  // Before we start, fetch all the users in our db to avoid explosions
-  // Include those which are IN_PROGRESS OR null
-  let allPosts = db.getCollection('scraps').chain().data();
-  let userFetches = allPosts.map(post => bot.fetchUser(post.authorId).catch(err => err));
-  Promise.all(userFetches)
-    .then(results => {
-      results.forEach(result => {
-        if (result instanceof Error) winston.error(`Fetch error encountered: ${result}`);
-      });
-      winston.info('Fetch completed!');
-      fetched = true;
-    })
-    .catch(err => winston.error(err));
   // If a post is IN_PROGRESS and never got unset, reset it to null
   const inProgressPosts = allPosts.filter(post => post.botMessageId === 'IN_PROGRESS');
   inProgressPosts.forEach(post => {
@@ -116,7 +102,6 @@ bot.on('ready', function (event) {
 bot.on('message', function (message) {
   // Handle commands
   if (!message.author.bot) {
-    if (!fetched) return; // Don't run any commands if we haven't done a full fetch
     let guild = message.guild;
     if (!guild) return;
     let thisGuildInfo = getGuildInfo(guild);
